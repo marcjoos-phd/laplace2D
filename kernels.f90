@@ -107,6 +107,49 @@ contains
 
   end subroutine kernel_gpu_reduce
 
+  attributes(global) subroutine kernel_gpu_shmem(a, anew, error, nxi, nyi)
+    implicit none
+
+    integer, value, intent(in) :: nxi, nyi
+    real(dp), dimension(nxi,nyi), intent(in) :: a
+    real(dp), dimension(nxi,nyi), intent(inout) :: anew
+    real(dp), dimension(nxi/block_dimx+1,nyi/block_dimy+1), intent(inout) :: error
+    real(dp), shared, dimension(block_dimx,block_dimy) :: err_sh
+    real(dp), shared, dimension(0:block_dimx+1,0:block_dimy+1) :: tile
+    integer :: i, j, k, tx, ty
+
+    i = (blockIdx%x - 1)*blockDim%x + threadIdx%x
+    j = (blockIdx%y - 1)*blockDim%y + threadIdx%y
+    tx = threadIdx%x
+    ty = threadIdx%y
+    err_sh(tx,ty) = 0.d0
+    
+    if (i > 1 .and. j > 1) then
+       tile(tx-1,ty-1) = a(i-1,j-1)
+    endif
+    if (i > 1 .and. j < nyi .and. ty >= block_dimy-2) then
+       tile(tx-1,ty+1) = a(i-1,j+1)
+    endif
+    if (i < nxi .and. j > 1 .and. tx >= block_dimx-2) then
+       tile(tx+1,ty-1) = a(i+1,j-1)
+    endif
+    if (i < nxi .and. j < nyi .and. tx >= block_dimx-2 &
+         & .and. ty >= block_dimy-2) then
+       tile(tx+1,ty+1) = a(i+1,j+1)
+    endif
+    call syncthreads()
+    
+    if (i > 1 .and. i < nxi .and. j > 1 .and. j < nyi) then
+       anew(i,j) = 0.25d0*(tile(tx-1,ty) + tile(tx+1,ty) &
+                       & + tile(tx,ty-1) + tile(tx,ty+1))
+       err_sh(tx,ty) = abs(anew(i,j) - tile(tx,ty))
+    endif
+    call syncthreads()
+    
+    error(blockIdx%x,blockIdx%y) = maxval(err_sh)
+
+  end subroutine kernel_gpu_shmem
+
   attributes(global) subroutine max_reduce(local_error, error, nxi, nyi)
     implicit none
 
@@ -163,6 +206,60 @@ contains
     if (tindex == 1) error(bindex) = berr(1)
 
   end subroutine kernel_gpu_reduce
+
+  attributes(global) subroutine kernel_gpu_shmem(a, anew, error, nxi, nyi)
+    implicit none
+
+    integer, value, intent(in) :: nxi, nyi
+    real(dp), dimension(nxi,nyi), intent(in) :: a
+    real(dp), dimension(nxi,nyi), intent(inout) :: anew
+    real(dp), shared, dimension(block_dimx*block_dimy) :: berr
+    real(dp), shared, dimension(0:block_dimx+1,0:block_dimy+1) :: tile
+    real(dp), dimension((nxi/block_dimx+1)*(nyi/block_dimy+1)), intent(inout) :: error
+    integer :: i, j, k, tx, ty, tindex, bindex
+
+    i = (blockIdx%x - 1)*blockDim%x + threadIdx%x
+    j = (blockIdx%y - 1)*blockDim%y + threadIdx%y
+    tx = threadIdx%x
+    ty = threadIdx%y
+    tindex = tx + (ty - 1)*blockDim%x
+    bindex = blockIdx%x + (blockIdx%y - 1)*gridDim%x
+    berr(tindex) = 0.d0
+
+    if (i > 1 .and. j > 1) then
+       tile(tx-1,ty-1) = a(i-1,j-1)
+    endif
+    if (i > 1 .and. j < nyi .and. ty >= block_dimy-2) then
+       tile(tx-1,ty+1) = a(i-1,j+1)
+    endif
+    if (i < nxi .and. j > 1 .and. tx >= block_dimx-2) then
+       tile(tx+1,ty-1) = a(i+1,j-1)
+    endif
+    if (i < nxi .and. j < nyi .and. tx >= block_dimx-2 &
+         & .and. ty >= block_dimy-2) then
+       tile(tx+1,ty+1) = a(i+1,j+1)
+    endif
+    call syncthreads()
+    
+    if (i > 1 .and. i < nxi .and. j > 1 .and. j < nyi) then
+       anew(i,j) = 0.25d0*(tile(tx-1,ty) + tile(tx+1,ty) &
+                       & + tile(tx,ty-1) + tile(tx,ty+1))
+       berr(tindex) = abs(anew(i,j) - a(i,j))
+    endif
+    call syncthreads()
+    
+    k = block_dimx*block_dimy/2
+    do while (k > 0)
+       if (tindex < k) then
+          berr(tindex) = max(berr(tindex), berr(tindex+k))
+       endif
+       k = k/2
+       call syncthreads()
+    enddo
+    
+    if (tindex == 1) error(bindex) = berr(1)
+
+  end subroutine kernel_gpu_shmem
 
   attributes(global) subroutine max_reduce(local_error, error, nxi)
     implicit none

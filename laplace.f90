@@ -111,11 +111,11 @@ program laplace
 #else
      error_dev = error
 
-#ifndef FASTREDUCE
-     call kernel_gpu_reduce<<<dimGrid, dimBlock>>>(adev, adevnew, edev, nx, ny)
-#else
-     call kernel_gpu_reduce<<<dimGrid, dimBlock>>>(adev, adevnew, edev, nx, ny)
-#endif
+     if (shmem) then
+        call kernel_gpu_shmem<<<dimGrid, dimBlock>>>(adev, adevnew, edev, nx, ny)
+     else
+        call kernel_gpu_reduce<<<dimGrid, dimBlock>>>(adev, adevnew, edev, nx, ny)
+     endif
 
 #ifdef DEBUG_CUDA
      ierrSync  = cudaGetLastError()
