@@ -172,7 +172,11 @@ program laplace
            a = adev
            fname = "data_cuda_"//trim(numout)//'.h5'
 #endif
+#ifdef HDF5
            call write_hdf5(a, nx, ny, 1, trim(fname))
+#else
+           call write_posix(a, nx, ny, 1, trim(fname))
+#endif
         endif
      endif
      iter = iter + 1

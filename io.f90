@@ -38,7 +38,8 @@ end module readIO
 
 module writeIO
 contains
-  
+
+#ifdef HDF5
   subroutine write_hdf5(array, nx, ny, nz, fname)
     use hdf5
     use prec
@@ -72,7 +73,26 @@ contains
     
     return
   end subroutine write_hdf5
+#endif
 
+  subroutine write_posix(array, nx, ny, nz, fname)
+    use prec
+    implicit none
+
+    integer, intent(in) :: nx, ny, nz
+    real(dp), dimension(nx,ny,nz), intent(in) :: array
+    character(len=*) :: fname
+
+    fname = trim(fname)//'.bin'
+
+    open(unit=10, file=trim(fname), status='unknown', form='unformatted')
+    write(10) nx, ny, nz
+    write(10) array
+    close(10)
+
+    return
+  end subroutine write_posix
+  
   subroutine convtoasc(number, sstring)
     implicit none
     integer, intent(in) :: number
